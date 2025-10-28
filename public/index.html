@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Code Explainer & Refactoring Assistant</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>AI Code Explainer & Refactoring Assistant</h1>
+      <p class="tagline">Understand • Refactor • Review</p>
+    </div>
+
+    <div class="controls">
+      <label class="control-block">
+        <span class="label">Mode</span>
+        <select id="modeSelect">
+          <option value="beginner">Beginner 👶 Teach me slowly</option>
+          <option value="pro">Pro 🚀 Keep it concise</option>
+          <option value="reviewer">Reviewer 🧠 Be strict</option>
+        </select>
+      </label>
+
+      <button id="exportBtn" class="btn-outline">Export Report</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEFT SIDE -->
+    <section class="panel panel-left">
+      <div class="panel-head">
+        <div class="title-row">
+          <h2>Your Code</h2>
+          <select id="langSelect" class="chip">
+            <option>Python</option>
+            <option>JavaScript</option>
+            <option>Java</option>
+          </select>
+        </div>
+        <p class="hint">Max 200 lines per request</p>
+      </div>
+
+      <textarea id="codeInput" class="code-area" spellcheck="false">
+def find_max(nums):
+    max_num = nums[0]
+    for n in nums:
+        if n > max_num:
+            max_num = n
+    return max_num
+      </textarea>
+
+      <label class="question-block">
+        <div class="label-row">
+          <span class="label">Optional question to AI</span>
+          <span class="sub">Leave blank if you just want an explanation</span>
+        </div>
+        <input
+          id="questionInput"
+          class="question-input"
+          placeholder="Explain this step-by-step and tell me if it handles edge cases."
+        />
+      </label>
+
+      <div class="actions-row">
+        <button id="analyzeBtn" class="btn-primary">Generate Analysis</button>
+        <button id="clearBtn"   class="btn-ghost">Clear</button>
+      </div>
+    </section>
+
+    <!-- RIGHT SIDE -->
+    <section class="panel panel-right">
+      <div class="panel-head">
+        <h2>AI Response</h2>
+        <p class="modeIndicator">Mode: <span id="currentModeText">Beginner 👶</span></p>
+      </div>
+
+      <div id="loading" class="loading hidden">Thinking...</div>
+
+      <div id="responseArea" class="response-sections hidden">
+        <div class="resp-card">
+          <div class="resp-title">Summary</div>
+          <pre id="respSummary" class="resp-body"></pre>
+        </div>
+
+        <div class="resp-card">
+          <div class="resp-title">Step-by-step Explanation</div>
+          <pre id="respExplanation" class="resp-body"></pre>
+        </div>
+
+        <div class="resp-card">
+          <div class="resp-title">Possible Improvements</div>
+          <pre id="respImprovements" class="resp-body"></pre>
+        </div>
+
+        <div class="resp-card">
+          <div class="resp-title">Quality & Testing</div>
+          <pre id="respQuality" class="resp-body"></pre>
+        </div>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn-outline small">Refactor Code</button>
+        <button class="btn-outline small">Generate Unit Tests</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>
+      This tool is designed to assist developers, not replace them.
+      You still own your code and your review.
+    </p>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>

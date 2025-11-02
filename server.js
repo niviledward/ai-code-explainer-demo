@@ -1,51 +1,61 @@
+// server.js
 const express = require("express");
 const path = require("path");
-const fetch = require("node-fetch"); // node-fetch@2
+const fetch = require("node-fetch"); // npm i node-fetch@2
 const app = express();
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 // ============================================================================
-// Helper: tone / persona instructions per mode
+// Helper: mode instructions
 // ============================================================================
 function modeInstructions(mode) {
   if (mode === "beginner") {
     return `
-You are a friendly tutor.
-Use simple language.
-Be supportive.
-Include the "inputs_outputs" field.
-Explain like to a first-year student.
-Do NOT assume they already know terms like 'time complexity' - briefly define it.
+You are a friendly tutor helping a beginner developer.
+Use simple, kind explanations.
+Add error handling if missing.
+Explain safe practices and potential edge cases.
+The refactor must be readable, well-commented, and defensive (handle invalid inputs, empty lists, etc.).
+Do NOT use advanced constructs that a new coder wouldn’t understand.
 `;
   }
   if (mode === "pro") {
     return `
 You are talking to an experienced developer.
-Be concise.
-Do NOT include 'inputs_outputs'.
-Focus on correctness, complexity, maintainability, readability.
-Avoid fluff.
-`;
-  }
-  if (mode === "reviewer") {
-    return `
-You are doing a code review as a senior engineer.
-Be direct and honest.
-Call out risks, edge cases, missing validation, naming issues.
-Do NOT include 'inputs_outputs'.
-Use a professional tone.
+Refactor the code to be concise, clean, and Pythonic.
+Simplify where possible. Avoid redundancy.
+Keep behavior identical but remove unnecessary checks or verbose logic.
+No comments, just clean, efficient code.
 `;
   }
   return "";
 }
 
 // ============================================================================
+// Utility: universal JSON flattener
+// ============================================================================
+function flattenAny(value, depth = 0) {
+  if (value == null) return "Not specified";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (Array.isArray(value)) {
+    if (depth > 1) return JSON.stringify(value);
+    return value.map((v) => flattenAny(v, depth + 1)).join(", ");
+  }
+  if (typeof value === "object") {
+    const parts = [];
+    for (const [k, v] of Object.entries(value)) {
+      parts.push(`${k}: ${flattenAny(v, depth + 1)}`);
+    }
+    return parts.join(", ");
+  }
+  return String(value);
+}
+
+// ============================================================================
 // /api/analyze
-// ============================================================================
-// ============================================================================
-// /api/analyze (hardened JSON enforcement + sanitizer)
 // ============================================================================
 app.post("/api/analyze", async (req, res) => {
   const { mode, code, question } = req.body;
@@ -55,88 +65,42 @@ You are an AI Code Explainer.
 
 ${modeInstructions(mode)}
 
-Task:
-Analyze the user's code and answer the user's question if provided.
+Analyze the following user code and provide a structured JSON output.
 
-Return ONLY valid JSON. No backticks. No markdown. No comments.
-Do not include any prose outside JSON.
+Return ONLY valid JSON. No markdown, no backticks.
 
 For BEGINNER mode:
-Return JSON with keys:
-"summary", "inputs_outputs", "steps", "time_complexity", "improvements", "caution"
+Return JSON:
+{
+  "summary": "...",
+  "time_complexity": "...",
+  "improvements": ["...", "..."],
+  "caution": "...",
+  "inputs_outputs": {
+    "inputs": "...",
+    "outputs": "...",
+    "side_effects": "..."
+  },
+  "steps": ["...", "..."]
+}
 
-For PRO or REVIEWER mode:
-Return JSON with keys:
-"summary", "steps", "time_complexity", "improvements", "caution"
+For PRO mode:
+Return JSON:
+{
+  "summary": "...",
+  "time_complexity": "...",
+  "improvements": ["...", "..."],
+  "caution": "..."
+}
 
-Rules:
-- "steps" MUST be an array of STRINGS (not objects).
-- "improvements" MUST be an array of STRINGS.
-- If unknown, include a short string like "Not specified".
-- Do NOT add explanations outside the JSON.
-- Do NOT include trailing commas.
-- Do NOT include parentheses commentary outside of string values.
-
-User question (may be empty):
-${question || "Explain the code and how to improve it."}
+User question: ${question || "Explain the code and how to improve it."}
 
 User code:
 ${code}
 `;
 
-  // --- helpers: cleaning & normalization ---
-  const stripFences = (s) =>
-    s.replace(/```json/gi, "").replace(/```/g, "").trim();
-
-  const normalizeQuotes = (s) =>
-    s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
-
-  const stripComments = (s) =>
-    s
-      // remove /* ... */ blocks
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      // remove // line comments
-      .replace(/(^|\s)\/\/.*$/gm, "");
-
-  const removeTrailingCommas = (s) =>
-    s
-      .replace(/,\s*([}\]])/g, "$1"); // trailing commas before } or ]
-
-  // The exact problem you saw: JSON line like
-  // "time_complexity": "O(n)" (extra explanation...)
-  // We remove any parenthetical outside the string after closing quote.
-  const removeParenAfterStringValue = (s) =>
-    s.replace(
-      /(":\s*"(?:[^"\\]|\\.)*")\s*\([^)]*\)/g,
-      "$1"
-    );
-
-  const extractInnermostJson = (s) => {
-    // Try to grab the first '{' to last '}' slice if garbage surrounds it
-    const start = s.indexOf("{");
-    const end = s.lastIndexOf("}");
-    if (start !== -1 && end !== -1 && end > start) {
-      return s.slice(start, end + 1);
-    }
-    return s;
-  };
-
-  const coerceToStrings = (arr) =>
-    Array.isArray(arr)
-      ? arr.map((item) => {
-          if (typeof item === "string") return item;
-          if (item && typeof item === "object") {
-            // Prefer common keys like "action", "step", "text"
-            const v = item.action || item.step || item.text;
-            return typeof v === "string" ? v : JSON.stringify(item);
-          }
-          return String(item);
-        })
-      : [];
-
   try {
     console.log("➡ /api/analyze calling Ollama (phi:latest) ...");
-
     const ollamaRes = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -144,170 +108,152 @@ ${code}
         model: "phi:latest",
         prompt,
         stream: false,
-        // ✨ Ask Ollama to format the response as pure JSON
         format: "json"
       })
     });
 
-    console.log("➡ /api/analyze ollamaRes status:", ollamaRes.status);
     const data = await ollamaRes.json();
-    console.log("🔥 RAW FROM OLLAMA:", data); 
-
     let raw = data.response || "{}";
 
-    // 1) Clean common issues
-    raw = stripFences(raw);
-    raw = normalizeQuotes(raw);
-    raw = stripComments(raw);
-    raw = removeParenAfterStringValue(raw);
-    raw = removeTrailingCommas(raw);
-    raw = extractInnermostJson(raw);
+    // Clean up messy model output
+    raw = raw.replace(/```json|```/gi, "").trim();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start !== -1 && end !== -1) raw = raw.slice(start, end + 1);
 
     let parsed;
     try {
       parsed = JSON.parse(raw);
-    } catch (e1) {
-      // One more attempt: remove any leftover junk after the last closing brace
-      raw = extractInnermostJson(raw);
-      try {
-        parsed = JSON.parse(raw);
-      } catch (e2) {
-        console.warn("⚠ JSON parse failed after cleaning. Returning fallback.\nCLEANED:", raw);
-        parsed = null;
-      }
+    } catch (e) {
+      console.warn("⚠ JSON parse failed, fallback used.");
+      parsed = null;
     }
 
-    // 2) Normalize shape for UI
-    if (!parsed || typeof parsed !== "object") {
-      // fallback
-      const fallback = {
+    if (!parsed) {
+      parsed = {
         summary: "Model returned something I could not fully parse.",
-        steps: [data.response || "No response"],
         time_complexity: "unknown",
         improvements: [],
-        caution: "Parsing failed"
-      };
-      if (mode === "beginner") {
-        fallback.inputs_outputs = {
+        caution: "Parsing failed",
+        steps: [],
+        inputs_outputs: {
           inputs: "unknown",
           outputs: "unknown",
           side_effects: "unknown"
-        };
-      }
-      return res.json(fallback);
+        }
+      };
     }
 
-    // Ensure required fields exist
-    parsed.summary = parsed.summary || "No summary provided.";
-    parsed.time_complexity = parsed.time_complexity || "Not provided.";
-    parsed.caution = parsed.caution || "No caution provided.";
+    // Normalize fields
+    parsed.improvements = Array.isArray(parsed.improvements)
+      ? parsed.improvements.map((i) => (typeof i === "string" ? i : JSON.stringify(i)))
+      : [];
 
-    // steps -> strings[]
-    parsed.steps = coerceToStrings(parsed.steps);
+    parsed.steps = Array.isArray(parsed.steps)
+      ? parsed.steps.map((i) => (typeof i === "string" ? i : JSON.stringify(i)))
+      : [];
 
-    // improvements -> strings[]
-    parsed.improvements = coerceToStrings(parsed.improvements);
-
-    // Beginner: guarantee inputs_outputs
     if (mode === "beginner") {
-      parsed.inputs_outputs = parsed.inputs_outputs || {};
-      parsed.inputs_outputs.inputs =
-        parsed.inputs_outputs.inputs || "Not specified";
-      parsed.inputs_outputs.outputs =
-        parsed.inputs_outputs.outputs || "Not specified";
-      parsed.inputs_outputs.side_effects =
-        parsed.inputs_outputs.side_effects || "Not specified";
+      const io = parsed.inputs_outputs || {};
+      parsed.inputs_outputs = {
+        inputs: flattenAny(io.inputs),
+        outputs: flattenAny(io.outputs),
+        side_effects: flattenAny(io.side_effects)
+      };
     } else {
       delete parsed.inputs_outputs;
     }
 
-    return res.json(parsed);
+    res.json(parsed);
   } catch (err) {
     console.error("❌ ERROR /api/analyze:", err);
     res.status(500).json({ error: "AI analyze failed" });
   }
 });
 
-
 // ============================================================================
-// /api/refactor
+// /api/refactor — DIFFERENT for beginner vs pro
 // ============================================================================
 app.post("/api/refactor", async (req, res) => {
   const { mode, code } = req.body;
 
   const prompt = `
-You are an AI code refactoring assistant.
+${modeInstructions(mode)}
 
-Audience mode: ${mode}.
-Rules:
-- Produce cleaner, safer, more readable code.
-- Keep the same behavior.
-- Add basic error handling or type checks if missing.
-- Use better naming if needed.
-- DO NOT explain first. Return JSON only.
+Refactor this code. Follow rules:
 
-Return ONLY valid JSON.
-Do not include backticks, code fences, or markdown.
-Return JSON with keys:
-"refactored_code": the improved full code as a string,
-"rationale": an array of short bullet points telling why it's better.
+For BEGINNER mode:
+- Keep logic same.
+- Add basic error handling (e.g., empty input, wrong types).
+- Use clear variable names.
+- Add short comments to explain logic.
+- Follow consistent indentation.
 
-User code:
+For PRO mode:
+- Simplify and optimize.
+- Remove redundant steps or unnecessary reassignments.
+- Keep one-liners where possible.
+- Do NOT include comments.
+- Use Pythonic best practices.
+
+Return ONLY valid JSON, no markdown.
+
+Return JSON:
+{
+  "refactored_code": "...",
+  "rationale": ["...", "..."]
+}
+
+Code:
 ${code}
 `;
 
   try {
-      const ollamaRes = await fetch("http://localhost:11434/api/generate", {
+    console.log("➡ /api/refactor calling Ollama (phi:latest) ...");
+    const ollamaRes = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "phi:latest",
-        prompt: prompt,
-        stream: false
+        prompt,
+        stream: false,
+        format: "json"
       })
     });
-    const data = await ollamaRes.json();
-    let rawText = data.response || "{}";
 
-    // Strip fences if model ignored us
-    rawText = rawText
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
+    const data = await ollamaRes.json();
+    let raw = data.response || "{}";
+    raw = raw.replace(/```json|```/gi, "").trim();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start !== -1 && end !== -1) raw = raw.slice(start, end + 1);
 
     let parsed;
     try {
-      parsed = JSON.parse(rawText);
-
-      // normalize rationale: ensure array of strings
-      if (Array.isArray(parsed.rationale)) {
-        parsed.rationale = parsed.rationale.map(item => {
-          if (typeof item === "string") return item;
-          if (typeof item === "object" && item !== null) {
-            return JSON.stringify(item);
-          }
-          return String(item);
-        });
-      } else if (parsed.rationale) {
-        parsed.rationale = [String(parsed.rationale)];
-      } else {
-        parsed.rationale = [];
-      }
-
-      parsed.refactored_code =
-        parsed.refactored_code || "// No refactored code provided.";
-
+      parsed = JSON.parse(raw);
     } catch (e) {
-      console.warn("⚠ parse fail in /api/refactor, using fallback. Cleaned was:", rawText);
+      console.warn("⚠ JSON parse failed for refactor, fallback used.");
+      parsed = null;
+    }
 
+    if (!parsed || typeof parsed !== "object") {
       parsed = {
-        refactored_code:
-          "// failed to parse refactor output\n" +
-          "// raw model output was:\n" +
-          (data.response || ""),
+        refactored_code: "// Could not parse refactor output.",
         rationale: ["Parsing failed"]
       };
     }
+
+    // Format code with spacing
+    if (parsed.refactored_code) {
+      parsed.refactored_code = parsed.refactored_code
+        .replace(/\\n/g, "\n")
+        .replace(/\\t/g, "  ")
+        .trim();
+    }
+
+    parsed.rationale = Array.isArray(parsed.rationale)
+      ? parsed.rationale.map((i) => (typeof i === "string" ? i : JSON.stringify(i)))
+      : [];
 
     res.json(parsed);
   } catch (err) {
@@ -320,83 +266,59 @@ ${code}
 // /api/tests
 // ============================================================================
 app.post("/api/tests", async (req, res) => {
-  const { mode, code, language } = req.body;
+  const { code, language } = req.body;
 
   const prompt = `
 You are an AI test generator.
+Generate unit tests for the given code in ${language || "python"}.
+Include:
+- Normal case
+- Edge case
+- Invalid input case
+Return ONLY valid JSON.
 
-Language is ${language || "python"}.
-Generate unit tests for the user's code.
+Return JSON:
+{
+  "test_code": "...",
+  "notes": ["...", "..."]
+}
 
-Rules:
-- Focus on correctness, edge cases, bad input.
-- Include at least: normal case, edge case, error/invalid case.
-- Use a common/simple test style (unittest for Python, Jest for JS).
-- DO NOT explain first.
-
-You MUST return ONLY valid JSON.
-Do not include backticks, code fences, or markdown.
-
-Return JSON with keys:
-"test_code": string of the full test file,
-"notes": array of bullets explaining what each test covers.
-
-User code:
+Code:
 ${code}
 `;
 
   try {
+    console.log("➡ /api/tests calling Ollama (phi:latest) ...");
     const ollamaRes = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "phi:latest",
-        prompt: prompt,
-        stream: false
+        prompt,
+        stream: false,
+        format: "json"
       })
     });
 
     const data = await ollamaRes.json();
-    let rawText = data.response || "{}";
-
-    // Strip fences if needed
-    rawText = rawText
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
+    let raw = data.response || "{}";
+    raw = raw.replace(/```json|```/gi, "").trim();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start !== -1 && end !== -1) raw = raw.slice(start, end + 1);
 
     let parsed;
     try {
-      parsed = JSON.parse(rawText);
-
-      // normalize notes: ensure array of strings
-      if (Array.isArray(parsed.notes)) {
-        parsed.notes = parsed.notes.map(item => {
-          if (typeof item === "string") return item;
-          if (typeof item === "object" && item !== null) {
-            return JSON.stringify(item);
-          }
-          return String(item);
-        });
-      } else if (parsed.notes) {
-        parsed.notes = [String(parsed.notes)];
-      } else {
-        parsed.notes = [];
-      }
-
-      parsed.test_code =
-        parsed.test_code || "// No test code provided.";
-
-    } catch (e) {
-
+      parsed = JSON.parse(raw);
+    } catch {
       parsed = {
-        test_code:
-          "// failed to parse test output\n" +
-          "// raw model output was:\n" +
-          (data.response || ""),
+        test_code: "// Could not parse tests output.",
         notes: ["Parsing failed"]
       };
     }
+
+    if (parsed.test_code)
+      parsed.test_code = parsed.test_code.replace(/\\n/g, "\n").trim();
 
     res.json(parsed);
   } catch (err) {
@@ -409,6 +331,4 @@ ${code}
 // Start server
 // ============================================================================
 const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
